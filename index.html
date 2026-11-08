@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ballyfermot History Map</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans+Condensed:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one-screen map with a reading panel on the right; stacks map-over-panel on phones */
+:root {
+  --bg: #e9ece6;
+  --surface: #f7f8f4;
+  --ink: #1d2a2c;
+  --ink-soft: #4d5a5b;
+  --line: #c9cfc6;
+  --accent: #9b2f24;
+  --accent-soft: #f1dcd6;
+  --park: #5f7a52;
+  --warn-bg: #fbf0d3;
+  --warn-ink: #6b4a06;
+  --font-display: "Spectral", Georgia, "Times New Roman", serif;
+  --font-body: "Spectral", Georgia, "Times New Roman", serif;
+  --font-ui: "IBM Plex Sans Condensed", "Arial Narrow", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141b1c; --surface: #1c2526; --ink: #e4e8e3; --ink-soft: #a7b1ae; --line: #33403f;
+    --accent: #e0775f; --accent-soft: #3a2420; --park: #9db88d; --warn-bg: #3a2f14; --warn-ink: #f1d58e;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141b1c; --surface: #1c2526; --ink: #e4e8e3; --ink-soft: #a7b1ae; --line: #33403f;
+  --accent: #e0775f; --accent-soft: #3a2420; --park: #9db88d; --warn-bg: #3a2f14; --warn-ink: #f1d58e;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 var(--font-body); }
+.app { height: 100%; display: grid; grid-template-rows: auto auto 1fr; }
+header.bar {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px;
+  padding-block: 12px 10px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  border-bottom: 1px solid var(--line); background: var(--surface);
+}
+.bar h1 { margin: 0; font: 600 1.35rem/1.2 var(--font-display); text-wrap: balance; }
+.bar .tag { font: 500 0.78rem/1.3 var(--font-ui); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft); }
+.bar .proto { margin-left: auto; font: 500 0.78rem/1 var(--font-ui); background: var(--warn-bg); color: var(--warn-ink); padding: 5px 9px; border-radius: 4px; }
+nav.eras {
+  display: flex; gap: 8px; overflow-x: auto; padding-block: 10px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  border-bottom: 1px solid var(--line); background: var(--bg);
+}
+.eras button {
+  flex: none; font: 500 0.85rem/1 var(--font-ui); color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 999px; padding: 7px 12px; cursor: pointer;
+}
+.eras button[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.eras button:disabled { opacity: 0.45; cursor: default; }
+.eras button:focus-visible, .layer-toggle:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.eras .count { font-family: var(--font-mono); font-size: 0.75rem; margin-left: 4px; opacity: 0.75; }
+main.body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 440px); min-height: 0; }
+#map { min-height: 0; background: var(--bg); }
+.map-wrap { position: relative; min-height: 0; display: grid; }
+.notice {
+  position: absolute; z-index: 500; left: 12px; right: 12px; bottom: 12px; max-width: 460px;
+  background: var(--warn-bg); color: var(--warn-ink); font: 0.9rem/1.4 var(--font-ui); padding: 10px 12px; border-radius: 6px;
+}
+.layers {
+  position: absolute; z-index: 500; top: 12px; right: 12px; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font: 0.82rem/1.35 var(--font-ui); max-width: 210px;
+}
+.layers strong { display: block; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; font-size: 0.72rem; color: var(--ink-soft); margin-bottom: 4px; }
+.layer-toggle { display: flex; gap: 6px; align-items: center; margin-top: 3px; }
+.layer-toggle input:disabled + span { color: var(--ink-soft); }
+aside.panel { min-width: 0; overflow-y: auto; background: var(--surface); border-left: 1px solid var(--line); }
+.panel-inner { padding-block: 20px 32px; padding-left: max(20px, env(safe-area-inset-left, 0px)); padding-right: max(20px, env(safe-area-inset-right, 0px)); display: grid; gap: 18px; }
+.empty h2 { font: 600 1.2rem/1.3 var(--font-display); margin: 0 0 6px; }
+.empty p { margin: 0; color: var(--ink-soft); }
+.list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.list button { width: 100%; text-align: left; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; color: var(--ink); cursor: pointer; font: inherit; }
+.list button span { display: block; font: 0.85rem/1.4 var(--font-ui); color: var(--ink-soft); }
+.meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font: 500 0.75rem/1 var(--font-ui); letter-spacing: 0.04em; padding: 5px 8px; border-radius: 4px; background: var(--bg); color: var(--ink-soft); border: 1px solid var(--line); }
+.chip.review { background: var(--warn-bg); color: var(--warn-ink); border-color: transparent; }
+.chip.cat { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.story h2 { margin: 0; font: 600 clamp(1.4rem, 2.2vw, 1.75rem)/1.2 var(--font-display); text-wrap: balance; }
+.story .dek { margin: 6px 0 0; font: italic 1.05rem/1.5 var(--font-body); color: var(--ink-soft); }
+.where { font: 0.85rem/1.5 var(--font-ui); color: var(--ink-soft); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 8px 0; display: grid; gap: 2px; }
+.where .grid { font-family: var(--font-mono); font-size: 0.78rem; }
+.story-text p { margin: 0 0 0.9em; max-width: 65ch; }
+.story-text p:last-child { margin-bottom: 0; }
+h3.section { margin: 0 0 8px; font: 600 0.75rem/1.2 var(--font-ui); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); }
+ol.timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; border-left: 2px solid var(--line); }
+ol.timeline li { position: relative; padding: 0 0 12px 16px; font: 0.92rem/1.45 var(--font-body); }
+ol.timeline li::before { content: ""; position: absolute; left: -6px; top: 6px; width: 10px; height: 10px; border-radius: 50%; background: var(--surface); border: 2px solid var(--accent); }
+ol.timeline .when { display: block; font: 500 0.8rem/1.3 var(--font-mono); color: var(--accent); font-variant-numeric: tabular-nums; }
+ol.timeline sup, .story-text sup { font: 500 0.7rem var(--font-mono); color: var(--accent); }
+ol.sources { margin: 0; padding-left: 1.4em; display: grid; gap: 8px; font: 0.86rem/1.45 var(--font-ui); color: var(--ink-soft); }
+ol.sources a { color: var(--ink); text-underline-offset: 2px; overflow-wrap: anywhere; }
+.aside-note { background: var(--bg); border-radius: 6px; padding: 12px 14px; font: 0.9rem/1.5 var(--font-body); }
+.aside-note strong { font-family: var(--font-ui); font-weight: 600; }
+.review-qs { border: 1px dashed var(--line); border-radius: 6px; padding: 12px 14px; font: 0.9rem/1.5 var(--font-ui); }
+.review-qs ol { margin: 6px 0 0; padding-left: 1.2em; }
+.back { font: 500 0.85rem var(--font-ui); background: none; border: 0; color: var(--accent); padding: 0; cursor: pointer; justify-self: start; }
+/* Map symbol: OS-style church cross */
+.pin { width: 30px; height: 30px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35); display: grid; place-items: center; color: #fff; font: 600 18px/1 var(--font-ui); }
+.pin.active { outline: 3px solid var(--accent-soft); }
+.leaflet-container { font-family: var(--font-ui); }
+.leaflet-control-attribution { font-size: 11px; }
+@media (max-width: 760px) {
+  .app { height: auto; min-height: 100%; }
+  main.body { grid-template-columns: 1fr; }
+  .map-wrap { height: 55vh; min-height: 300px; }
+  aside.panel { border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
+  .bar .proto { margin-left: 0; }
+  .layers { max-width: 170px; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="bar">
+    <h1>Ballyfermot History Map</h1>
+    <span class="tag">Stories of Dublin 10, placed where they happened</span>
+    <span class="proto">Prototype for review</span>
+  </header>
+  <nav class="eras" id="eras" aria-label="Filter stories by era"></nav>
+  <main class="body">
+    <div class="map-wrap">
+      <div id="map" role="region" aria-label="Map of Ballyfermot with story locations"></div>
+      <div class="layers" aria-label="Map layers">
+        <strong>Map layers</strong>
+        <label class="layer-toggle"><input type="radio" name="base" id="layer-today" checked> <span>Today (OpenStreetMap)</span></label>
+        <label class="layer-toggle"><input type="radio" name="base" id="layer-1830s" disabled> <span>1830s 6-inch map (phase 2)</span></label>
+        <label class="layer-toggle"><input type="radio" name="base" id="layer-1900s" disabled> <span>1900s 25-inch map (phase 2)</span></label>
+      </div>
+      <div class="notice" id="tile-notice" hidden>The background map couldn't load here. Open this file in a normal web browser with an internet connection; the story pin and panel still work.</div>
+    </div>
+    <aside class="panel" id="panel" aria-live="polite"><div class="panel-inner" id="panel-inner"></div></aside>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+/* =====================================================================
+   SETTINGS
+   SHEET_CSV_URL: paste the "Publish to web > CSV" link of the Stories
+   tab here and the map reads the sheet instead of the stories below.
+   Only rows with status "Approved" are shown from the sheet.
+   PREVIEW: also show "In review" stories, badged, for internal review.
+   ===================================================================== */
+const SHEET_CSV_URL = "";
+const PREVIEW = false;
+const SHOWN_STATUSES = PREVIEW ? ["Approved", "In review"] : ["Approved"];
+
+/* Eras used for the filter chips. A story shows under every era its years overlap. */
+const ERAS = [
+  { id: "medieval", label: "Medieval", from: 1100, to: 1599 },
+  { id: "early-modern", label: "1600–1899", from: 1600, to: 1899 },
+  { id: "pre-estate", label: "1900–1947", from: 1900, to: 1947 },
+  { id: "estate", label: "Estate years 1948–1989", from: 1948, to: 1989 },
+  { id: "recent", label: "1990 to today", from: 1990, to: 2100 }
+];
+
+/* =====================================================================
+   STORIES — same fields as the Stories tab of the story register.
+   ===================================================================== */
+const STORIES = [
+  {
+    story_id: "BF-001",
+    slug: "st-laurences-graveyard",
+    title: "The graveyard under the mound",
+    summary: "Ballyfermot's medieval parish church and graveyard lie buried under the grassy mound in Le Fanu Park.",
+    story_text: [
+      "Behind the houses on the bend of Raheen Park, Le Fanu Park rises into a low grassy mound. Most people walk past it without a second look. Underneath is one of the oldest places in Ballyfermot: the ruins of the parish church of St Laurence and the graveyard that surrounded it.<sup>[1]</sup>",
+      "The church was built in the 13th century as part of a Norman manor centred on Ballyfermot Castle, a short distance away. A church inspection in 1615 recorded it as a ruin, and it seems to have gone out of use around 1660.<sup>[1][4]</sup> The graveyard carried on. Burials continued for centuries afterwards, many of them never written down, and some local families believe relatives were laid there as late as the 1930s.<sup>[1][2][3]</sup>",
+      "When the Corporation estate grew up around it from the late 1940s, the walled graveyard became part of everyday life. Older residents remember doing homework among the headstones, racing along the paths, and scaring each other with stories of a headless coachman.<sup>[2]</sup>",
+      "In 1972 Dublin Corporation covered the ruins with earth, creating the mound you can see today. The graves were not moved. Some residents saw it as a desecration; the City Archaeologist later said that burying a site like this protects it from vandalism and weather.<sup>[2]</sup> A test excavation in 1998 found the old graveyard wall and human remains just below the surface.<sup>[1]</sup>",
+      "In the most recent reports we found, nothing on the ground marked the site, and locals had called for a plaque.<sup>[2]</sup>"
+    ].join("\n\n"),
+    latitude: 53.337834,
+    longitude: -6.354496,
+    location_description: "Le Fanu Park (\"The Lawns\"), near the corner of Le Fanu Road and Raheen Park",
+    location_precision: "Within 50 m",
+    grid_reference: "ITM 709586, 733217 · SMR DU018-031",
+    year_start: 1200,
+    year_end: 1972,
+    era: "Medieval",
+    category: "Buildings & places",
+    tags: "graveyard; church; St Laurence; Le Fanu Park; Normans",
+    image_url: "",
+    image_credit: "",
+    image_rights: "Not cleared",
+    status: "In review",
+    drafted_by: "Claude-assisted",
+    reviewer: "",
+    sensitivity: "Burials",
+    aside_title: "Why \"Le Fanu\"?",
+    aside_text: "The park and road are named after Joseph Sheridan Le Fanu, the Victorian ghost-story writer who spent part of his childhood in nearby Chapelizod. The local name for the park is The Lawns.<sup>[5]</sup>",
+    timeline: [
+      ["1200s", "Church of St Laurence built beside the manor castle [1]"],
+      ["1615", "Church inspection records the church and chancel in ruins [4]"],
+      ["c. 1660", "Church goes out of use; burials continue in the churchyard [1]"],
+      ["1900s–1930s", "Last burials, mostly unrecorded [1][2][3]"],
+      ["Late 1940s", "Corporation estate built around the old graveyard [2]"],
+      ["1972", "Dublin Corporation covers the ruins, leaving the mound [2]"],
+      ["1998", "Test excavation finds the graveyard wall and human remains [1]"],
+      ["2018", "Residents call for a plaque to mark the site [2]"]
+    ],
+    sources: [
+      { text: "O'Donovan, E. (1998). Ballyfermot Upper, test excavation, licence 98E0367. Excavations.ie 1998:120.", url: "https://excavations.ie/report/1998/Dublin/0003293/" },
+      { text: "Whelan, Z. (28 June 2018). Some in Ballyfermot want to mark a graveyard that's been covered over, but not forgotten. Dublin Inquirer.", url: "https://www.dublininquirer.com/some-in-ballyfermot-want-to-mark-a-graveyard-that-s-been-covered-over-but-not-forgotten/" },
+      { text: "Garvey, M. Hidden graveyard 'shamefully covered over during the 1970s'. The Echo (date to confirm).", url: "https://www.echo.ie/?p=73067" },
+      { text: "IrishHistory.com. Church, Ballyfermot, Co. Dublin. Secondary source; 1615 date to check against Ball (1906).", url: "https://irishhistory.com/?p=60772" },
+      { text: "Scuffil, C. (19 April 2018). Joseph Sheridan Le Fanu. Dublin City Libraries blog.", url: "https://www.dublincity.ie/library/blog/joseph-sheridan-le-fanu" }
+    ]
+  }
+];
+
+/* ===================================================================== */
+const PRECISION_RADIUS = { "Exact": 0, "Within 50 m": 60, "Street": 150, "Approximate area": 350 };
+const state = { stories: [], era: "all", selected: null };
+const panel = document.getElementById("panel-inner");
+
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+/* Story text allows only <sup> citation markers; everything else is escaped. */
+function richText(s) { return esc(s).replace(/&lt;sup&gt;(\[\d+\](?:\[\d+\])*)&lt;\/sup&gt;/g, "<sup>$1</sup>"); }
+function overlaps(story, era) { return Number(story.year_start) <= era.to && Number(story.year_end || story.year_start) >= era.from; }
+function visible() { return state.stories.filter(s => state.era === "all" || overlaps(s, ERAS.find(e => e.id === state.era))); }
+
+function renderEras() {
+  const nav = document.getElementById("eras");
+  const all = [{ id: "all", label: "All eras" }, ...ERAS];
+  nav.innerHTML = all.map(e => {
+    const n = e.id === "all" ? state.stories.length : state.stories.filter(s => overlaps(s, e)).length;
+    return `<button type="button" data-era="${e.id}" aria-pressed="${state.era === e.id}" ${n === 0 && e.id !== "all" ? "disabled" : ""}>${esc(e.label)}<span class="count">${n}</span></button>`;
+  }).join("");
+  nav.querySelectorAll("button").forEach(b => b.addEventListener("click", () => { state.era = b.dataset.era; refresh(); }));
+}
+
+function renderEmpty() {
+  const list = visible();
+  panel.innerHTML = `
+    <div class="empty">
+      <h2>${list.length ? "Pick a story on the map" : "No stories in this era yet"}</h2>
+      <p>${list.length ? "Each pin is a sourced story about this exact spot. Tap one to read it." : "Try another era, or suggest a story from this period."}</p>
+    </div>
+    ${list.length ? `<ul class="list">${list.map(s => `<li><button type="button" data-id="${esc(s.story_id)}">${esc(s.title)}<span>${esc(s.summary)}</span></button></li>`).join("")}</ul>` : ""}
+    ${reviewQuestions()}`;
+  panel.querySelectorAll(".list button").forEach(b => b.addEventListener("click", () => select(b.dataset.id, true)));
+}
+
+function reviewQuestions() {
+  return `<div class="review-qs"><h3 class="section">Questions for reviewers</h3>
+    <ol><li>Would you open this to learn about your area?</li><li>Would you add a story, photo or memory of your own?</li><li>What's missing, wrong, or should be handled more carefully?</li></ol></div>`;
+}
+
+function renderStory(s) {
+  const timeline = (s.timeline || []).map(([when, what]) => `<li><span class="when">${esc(when)}</span>${richText(what.replace(/(\[\d+\])+$/, m => "<sup>" + m + "</sup>"))}</li>`).join("");
+  panel.innerHTML = `
+    <button type="button" class="back" id="back">← All stories</button>
+    <article class="story">
+      <div class="meta">
+        <span class="chip cat">${esc(s.category)}</span>
+        <span class="chip">${esc(s.year_start)}–${esc(s.year_end)}</span>
+        ${s.status !== "Approved" ? `<span class="chip review">${esc(s.status)} · not yet signed off</span>` : ""}
+      </div>
+      <h2 style="margin-top:10px">${esc(s.title)}</h2>
+      <p class="dek">${esc(s.summary)}</p>
+    </article>
+    <div class="where">
+      <span>${esc(s.location_description)}</span>
+      <span>Location accuracy: ${esc(s.location_precision)}</span>
+      ${s.grid_reference ? `<span class="grid">${esc(s.grid_reference)}</span>` : ""}
+    </div>
+    ${s.image_url ? `<figure style="margin:0"><img src="${esc(s.image_url)}" alt="${esc(s.title)}"><figcaption class="where">${esc(s.image_credit)}</figcaption></figure>` : ""}
+    <div class="story-text">${String(s.story_text).split(/\n\s*\n/).map(p => `<p>${richText(p)}</p>`).join("")}</div>
+    ${timeline ? `<section><h3 class="section">What happened here</h3><ol class="timeline">${timeline}</ol></section>` : ""}
+    ${s.aside_text ? `<div class="aside-note"><strong>${esc(s.aside_title)}</strong><br>${richText(s.aside_text)}</div>` : ""}
+    <section><h3 class="section">Sources</h3><ol class="sources">${(s.sources || []).map(src => `<li>${esc(src.text)}${src.url ? ` <a href="${esc(src.url)}" target="_blank" rel="noopener">Open source</a>` : ""}</li>`).join("")}</ol></section>
+    ${reviewQuestions()}`;
+  document.getElementById("back").addEventListener("click", () => select(null, false));
+  document.getElementById("panel").scrollTop = 0;
+}
+
+/* ---------- Map ---------- */
+let map = null, markerLayer = null;
+const markers = {};
+function initMap() {
+  if (!window.L) { document.getElementById("tile-notice").hidden = false; return; }
+  map = L.map("map", { zoomControl: true, scrollWheelZoom: true }).setView([53.3405, -6.358], 15);
+  let loaded = 0, failed = 0;
+  const today = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+  today.on("tileload", () => { loaded++; document.getElementById("tile-notice").hidden = true; });
+  today.on("tileerror", () => { failed++; if (failed >= 3 && loaded === 0) document.getElementById("tile-notice").hidden = false; });
+  markerLayer = L.layerGroup().addTo(map);
+}
+
+function drawMarkers() {
+  if (!map) return;
+  markerLayer.clearLayers();
+  for (const k in markers) delete markers[k];
+  visible().forEach(s => {
+    const lat = Number(s.latitude), lng = Number(s.longitude);
+    if (!isFinite(lat) || !isFinite(lng)) return;
+    const radius = PRECISION_RADIUS[s.location_precision] ?? 0;
+    if (radius) L.circle([lat, lng], { radius, color: "#9b2f24", weight: 1.5, dashArray: "5 5", fillOpacity: 0.08 }).addTo(markerLayer);
+    const icon = L.divIcon({ className: "", html: `<div class="pin${state.selected === s.story_id ? " active" : ""}" aria-hidden="true">✝</div>`, iconSize: [30, 30], iconAnchor: [15, 15] });
+    const m = L.marker([lat, lng], { icon, title: s.title, keyboard: true, alt: s.title }).addTo(markerLayer);
+    m.on("click", () => select(s.story_id, true));
+    markers[s.story_id] = m;
+  });
+}
+
+function select(id, fly) {
+  state.selected = id;
+  const s = state.stories.find(x => x.story_id === id);
+  if (s) {
+    renderStory(s);
+    try { history.replaceState(null, "", "#" + (s.slug || s.story_id)); } catch (e) {}
+    if (map && fly) map.flyTo([Number(s.latitude), Number(s.longitude)], 17, { duration: 0.6 });
+  } else {
+    renderEmpty();
+    try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
+  }
+  drawMarkers();
+}
+
+function refresh() {
+  renderEras();
+  if (state.selected && !visible().some(s => s.story_id === state.selected)) state.selected = null;
+  select(state.selected, false);
+}
+
+/* ---------- Optional: read the Google Sheet (published as CSV) ---------- */
+function parseCSV(text) {
+  const rows = []; let row = [], field = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else q = false; } else field += c; }
+    else if (c === '"') q = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n" || c === "\r") { if (c === "\r" && text[i + 1] === "\n") i++; row.push(field); rows.push(row); row = []; field = ""; }
+    else field += c;
+  }
+  if (field || row.length) { row.push(field); rows.push(row); }
+  const [head, ...body] = rows.filter(r => r.some(v => v.trim() !== ""));
+  return body.map(r => Object.fromEntries(head.map((h, i) => [h.trim(), (r[i] ?? "").trim()])));
+}
+function fromSheetRow(r) {
+  return {
+    ...r,
+    slug: r.slug || r.story_id,
+    sources: (r.source_list || "").split("\n").filter(Boolean).map(line => {
+      const url = (line.match(/https?:\/\/\S+/) || [""])[0];
+      return { text: line.replace(url, "").trim(), url };
+    }),
+    timeline: []
+  };
+}
+
+async function loadStories() {
+  if (SHEET_CSV_URL) {
+    try {
+      const res = await fetch(SHEET_CSV_URL, { cache: "no-store" });
+      if (!res.ok) throw new Error(res.status);
+      return parseCSV(await res.text())
+        .filter(r => SHOWN_STATUSES.includes(r.status) && (r.consent || "").toLowerCase() !== "no")
+        .map(fromSheetRow);
+    } catch (e) { console.warn("Couldn't read the sheet; using built-in stories.", e); }
+  }
+  return STORIES.filter(s => SHOWN_STATUSES.includes(s.status));
+}
+
+(async function start() {
+  initMap();
+  state.stories = await loadStories();
+  renderEras();
+  const want = decodeURIComponent(location.hash.slice(1));
+  const hit = state.stories.find(s => s.slug === want || s.story_id === want);
+  if (hit) select(hit.story_id, true); else select(null, false);
+  if (map && !hit && state.stories.length) {
+    const b = L.latLngBounds(state.stories.map(s => [Number(s.latitude), Number(s.longitude)]));
+    map.fitBounds(b.pad(0.6), { maxZoom: 16 });
+  }
+  window.addEventListener("hashchange", () => {
+    const h = decodeURIComponent(location.hash.slice(1));
+    const s = state.stories.find(x => x.slug === h || x.story_id === h);
+    if (s && s.story_id !== state.selected) select(s.story_id, true);
+  });
+})();
+</script>
+</body>
+</html>
